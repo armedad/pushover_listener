@@ -9,6 +9,19 @@ This custom integration allows Home Assistant to receive push notifications from
 - **Parses key-value pairs in the message body and adds them as individual event data fields**
 
 ## Installation
+
+### Option 1: HACS (Recommended)
+1. In Home Assistant, go to **HACS > Integrations**.
+2. Click the three dots in the top right and select **Custom repositories**.
+3. Enter the repository URL:
+   ```
+   https://github.com/armedad/pushover_listener
+   ```
+   and set the category to **Integration**.
+4. Find "Pushover Listener" in the list of custom integrations and click **Install**.
+5. Restart Home Assistant.
+
+### Option 2: Manual
 1. Copy the `pushover_listener` folder to your Home Assistant `custom_components` directory:
    ```sh
    cp -r pushover_listener/ /config/custom_components/
