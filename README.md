@@ -6,7 +6,7 @@ This custom integration allows Home Assistant to receive push notifications from
 - Registers Home Assistant as a Pushover Open Client device
 - Listens for push notifications in real time
 - Fires a `pushover_event` on the Home Assistant event bus for each received message
-- Extracts key-value pairs from the message body and includes them in the event data
+- **Parses key-value pairs in the message body and adds them as individual event data fields**
 
 ## Installation
 1. Copy the `pushover_listener` folder to your Home Assistant `custom_components` directory:
@@ -35,32 +35,50 @@ pushover_listener:
 ## Usage
 When a push notification is received, the integration fires a `pushover_event` on the Home Assistant event bus. The event data includes all fields from the Pushover message, plus any key-value pairs found in the message body.
 
-### Example Automation
-You can trigger automations based on incoming Pushover messages:
+### Key-Value Pair Parsing
+If your Pushover message body contains lines in the format `key=value`, each pair will be parsed and added as a separate field in the event data. This makes it easy to trigger automations based on structured data sent via Pushover.
 
-```yaml
-automation:
-  - alias: React to Pushover Event
-    trigger:
-      - platform: event
-        event_type: pushover_event
-    action:
-      - service: notify.persistent_notification
-        data:
-          message: "Received Pushover message: {{ trigger.event.data.message }}"
+#### Example: Sending a Message with Key-Value Pairs
+Send a message from the Pushover app or API with the following body:
+
+```
+type=alert
+level=critical
+message=Garage door open
 ```
 
-### Event Data Example
-A received event might look like:
+The resulting Home Assistant event will include:
 
 ```json
 {
   "id": "123456",
   "title": "Alert",
-  "message": "temperature=23.5\nhumidity=40",
-  "temperature": "23.5",
-  "humidity": "40"
+  "message": "type=alert\nlevel=critical\nmessage=Garage door open",
+  "type": "alert",
+  "level": "critical",
+  "message": "Garage door open"
 }
+```
+
+### Example Automation Using Parsed Fields
+You can trigger automations based on these parsed fields:
+
+```yaml
+automation:
+  - alias: Critical Alert from Pushover
+    trigger:
+      - platform: event
+        event_type: pushover_event
+        event_data:
+          level: critical
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          message: >
+            Critical alert received!
+            Type: {{ trigger.event.data.type }}
+            Level: {{ trigger.event.data.level }}
+            Details: {{ trigger.event.data.message }}
 ```
 
 ## Security & Privacy
