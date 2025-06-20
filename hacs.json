@@ -1,5 +1,6 @@
 {
   "name": "Pushover Listener",
+  "category": "integration",
   "content_in_root": false,
   "domains": ["pushover_listener"],
   "country": ["all"],
@@ -12,6 +13,5 @@
   "version": "1.0.0",
   "description": "Receive and parse Pushover push notifications as Home Assistant events, with key-value parsing support.",
   "documentation": "https://github.com/armedad/pushover_listener#readme",
-  "source": "https://github.com/armedad/pushover_listener",
-  "category": "integration"
+  "source": "https://github.com/armedad/pushover_listener"
 }
