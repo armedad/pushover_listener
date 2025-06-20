@@ -1,4 +1,7 @@
 {
   "name": "Pushover Listener",
-  "homeassistant": ">=2023.0.0"
+  "content_in_root": false,
+  "domain": "pushover_listener",
+  "homeassistant": ">=2023.0.0",
+  "render_readme": true
 }
