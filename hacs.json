@@ -1,0 +1,16 @@
+{
+  "name": "Pushover Listener",
+  "content_in_root": false,
+  "domains": ["pushover_listener"],
+  "country": ["all"],
+  "homeassistant": ">=2023.0.0",
+  "render_readme": true,
+  "iot_class": "cloud_push",
+  "filename": "pushover_listener",
+  "persistent_directory": ".storage",
+  "zip_release": false,
+  "version": "1.0.0",
+  "description": "Receive and parse Pushover push notifications as Home Assistant events, with key-value parsing support.",
+  "documentation": "https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME#readme",
+  "source": "https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME"
+}
