@@ -1,0 +1,9 @@
+{
+  "domain": "pushover_listener",
+  "name": "Pushover Listener",
+  "version": "1.0.0",
+  "documentation": "https://github.com/armedad/pushover_listener",
+  "dependencies": [],
+  "codeowners": ["@armedad"],
+  "requirements": ["websockets==13.1", "requests==2.32.4"]
+}
