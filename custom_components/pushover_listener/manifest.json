@@ -7,5 +7,5 @@
   "iot_class": "cloud_push",
   "dependencies": [],
   "codeowners": ["@armedad"],
-  "requirements": ["websockets==13.1", "requests==2.32.4"]
+  "requirements": ["websockets>=13.1", "requests==2.32.4"]
 }
