@@ -1,7 +1,7 @@
 {
   "domain": "pushover_listener",
   "name": "Pushover Listener",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/armedad/pushover_listener",
   "issue_tracker": "https://github.com/armedad/pushover_listener/issues",
   "iot_class": "cloud_push",
