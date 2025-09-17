@@ -24,6 +24,12 @@ _LOGGER = logging.getLogger(__name__)
 class PushoverClient:
     """Client for interacting with the Pushover Open Client API."""
 
+import os
+# ... other imports ...
+
+class PushoverClient:
+    """Client for interacting with the Pushover Open Client API."""
+
     def __init__(self, hass: HomeAssistant, email: str, password: str, device_name: str):
         """Initialize the Pushover client."""
         self.hass = hass
@@ -36,7 +42,9 @@ class PushoverClient:
 
     def _get_storage_path(self) -> str:
         """Return the full path to the local storage file for the device ID."""
-        return os.path.join(self.hass.config.path(STORAGE_PATH))
+        # Use a unique identifier for each user, like a sanitized email
+        sanitized_email = self.email.replace("@", "_at_").replace(".", "_dot_")
+        return os.path.join(self.hass.config.path(".storage"), f"pushover_listener_{sanitized_email}.json")
 
     async def load_cached_device_id(self):
         """Try to load previously saved device ID from disk."""
@@ -184,6 +192,7 @@ class PushoverClient:
     def unpack_json_payload(self, msg):
         """Extract key=value pairs embedded in the message body and merge them into the payload."""
         enriched = dict(msg)
+        enriched['user_email'] = self.email         
         if "message" in msg:
             lines = msg["message"].split("\n")
             for line in lines:
@@ -194,3 +203,5 @@ class PushoverClient:
                     if key:
                         enriched[key] = value
         return enriched
+
+
