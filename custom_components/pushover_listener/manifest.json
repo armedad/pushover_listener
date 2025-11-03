@@ -1,11 +1,12 @@
 {
-  "domain": "pushover_listener",
-  "name": "Pushover Listener",
-  "version": "1.1.0",
-  "documentation": "https://github.com/armedad/pushover_listener",
-  "issue_tracker": "https://github.com/armedad/pushover_listener/issues",
-  "iot_class": "cloud_push",
-  "dependencies": [],
-  "codeowners": ["@armedad"],
-  "requirements": ["websockets>=13.1", "requests>=2.32.4"]
-}
+    "domain": "pushover_listener",
+    "name": "Pushover Listener",
+    "version": "1.2.1",
+    "documentation": "https://github.com/armedad/pushover_listener",
+    "issue_tracker": "https://github.com/armedad/pushover_listener/issues",
+    "iot_class": "cloud_push",
+    "config_flow": true,
+    "dependencies": [],
+    "codeowners": ["@armedad"],
+    "requirements": []
+  }
