@@ -4,28 +4,45 @@ import asyncio
 import json
 import logging
 import os
-from aiohttp import ClientSession, WSMsgType
-import requests
-import async_timeout
+from aiohttp import ClientSession, WSMsgType, ClientError
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 
-LOGIN_URL = "https://api.pushover.net/1/users/login.json"
+from .const import PUSHOVER_EVENT
+# --- IMPORT FROM OUR NEW API FILE ---
+from .api import InvalidAuthError, async_validate_credentials
+
+# --- MOVED LOGIN_URL TO API.PY ---
 REGISTER_URL = "https://api.pushover.net/1/devices.json"
 MESSAGES_URL = "https://api.pushover.net/1/messages.json"
 DELETE_URL_TEMPLATE = (
     "https://api.pushover.net/1/devices/{device_id}/update_highest_message.json"
 )
 WEBSOCKET_URL = "wss://client.pushover.net/push"
-STORAGE_PATH = ".storage/pushover_listener.json"
-PUSHOVER_EVENT = "pushover_event"
+
+STORAGE_VERSION = 1
+STORAGE_KEY_TEMPLATE = "pushover_listener.{device_name}"
+
 _LOGGER = logging.getLogger(__name__)
 
-class PushoverClient:
-    """Client for interacting with the Pushover Open Client API."""
+# Constants for Backoff
+INITIAL_RECONNECT_DELAY = 10  # Start with 10 seconds
+MAX_RECONNECT_DELAY = 300     # Max 5 minutes (300 seconds)
+RECONNECT_FACTOR = 2          # Double the delay each time
 
-import os
-# ... other imports ...
+
+# --- THIS CLASS WAS MOVED TO API.PY ---
+# class InvalidAuthError(Exception):
+#    """Error to indicate there is invalid auth."""
+
+
+# --- THIS FUNCTION WAS MOVED TO API.PY ---
+# async def async_validate_credentials(
+# ...
+# )
+
 
 class PushoverClient:
     """Client for interacting with the Pushover Open Client API."""
@@ -38,161 +55,183 @@ class PushoverClient:
         self.device_name = device_name
         self.secret = None
         self.device_id = None
-        self._running = True
+        self._running = False
+        self._ws_task = None
+        self._reconnect_delay = INITIAL_RECONNECT_DELAY
 
-    def _get_storage_path(self) -> str:
-        """Return the full path to the local storage file for the device ID."""
-        # Use a unique identifier for each user, like a sanitized email
-        sanitized_email = self.email.replace("@", "_at_").replace(".", "_dot_")
-        return os.path.join(self.hass.config.path(".storage"), f"pushover_listener_{sanitized_email}.json")
+        storage_key = STORAGE_KEY_TEMPLATE.format(
+            device_name=self.device_name.replace(" ", "_")
+        )
+        self._store = Store(hass, STORAGE_VERSION, storage_key)
 
-    async def load_cached_device_id(self):
-        """Try to load previously saved device ID from disk."""
+    async def load_cached_device_id(self) -> str | None:
+        """Try to load previously saved device ID from storage helper."""
+        data = await self._store.async_load()
+        return data.get("device_id") if data else None
+
+    async def save_device_id(self, device_id: str) -> None:
+        """Persist the device ID to disk via storage helper."""
         try:
-            path = self._get_storage_path()
-
-            def read_device_id():
-                with open(path) as f:
-                    return json.load(f).get("device_id")
-
-            return await self.hass.async_add_executor_job(read_device_id)
-        except Exception:
-            return None
-
-    async def save_device_id(self, device_id):
-        """Persist the device ID to disk."""
-        try:
-            path = self._get_storage_path()
-
-            def write_device_id():
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                with open(path, "w") as f:
-                    json.dump({"device_id": device_id}, f)
-
-            await self.hass.async_add_executor_job(write_device_id)
+            await self._store.async_save({"device_id": device_id})
         except Exception as err:
             _LOGGER.warning("Failed to save device_id: %s", err)
 
-    async def start(self):
+    async def start(self) -> None:
         """Perform login, device registration (if needed), and discard old messages."""
-        await self.authenticate()
+        self._running = True
+        # Use the validation function (now imported)
+        self.secret = await async_validate_credentials(
+            self.hass, self.email, self.password
+        )
+        _LOGGER.info("Authentication successful for %s.", self.email)
+
         self.device_id = await self.load_cached_device_id()
         if not self.device_id:
-            await self.register_device()
+            await self.register_device()  # This will raise RuntimeError on failure
             await self.save_device_id(self.device_id)
         await self.download_and_discard_old_messages()
 
-    async def authenticate(self):
-        """Authenticate with Pushover to retrieve a session secret."""
-        _LOGGER.info("Authenticating with Pushover...")
-        resp = await self.hass.async_add_executor_job(
-            requests.post,
-            LOGIN_URL,
-            None,
-            {"email": self.email, "password": self.password},
-        )
-        data = resp.json()
-        if data["status"] != 1:
-            raise RuntimeError(f"Pushover login failed: {data}")
-        self.secret = data["secret"]
-        _LOGGER.info("Authentication successful.")
+    async def stop(self) -> None:
+        """Stop the listener."""
+        _LOGGER.info("Stopping Pushover listener for %s", self.device_name)
+        self._running = False
+        if self._ws_task:
+            self._ws_task.cancel()
+            try:
+                await self._ws_task
+            except asyncio.CancelledError:
+                _LOGGER.debug("WebSocket task cancelled.")
 
-    async def register_device(self):
+    async def register_device(self) -> None:
         """Register this client instance as a Pushover Open Client device."""
-        _LOGGER.info("Registering Open Client device...")
-        resp = await self.hass.async_add_executor_job(
-            requests.post,
-            REGISTER_URL,
-            None,
-            {"secret": self.secret, "name": self.device_name, "os": "O"},
-        )
-        data = resp.json()
-        if data["status"] != 1:
-            raise RuntimeError(f"Device registration failed: {data}")
-        self.device_id = data["id"]
-        _LOGGER.info("Registered device: %s", self.device_id)
+        _LOGGER.info("Registering Open Client device %s...", self.device_name)
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.post(
+                REGISTER_URL,
+                data={"secret": self.secret, "name": self.device_name, "os": "O"},
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                if data["status"] != 1:
+                    raise RuntimeError(f"Device registration failed: {data}")
+                self.device_id = data["id"]
+                _LOGGER.info("Registered device: %s", self.device_id)
+        except ClientError as err:
+            _LOGGER.error("Pushover device registration request failed: %s", err)
+            raise RuntimeError(
+                f"Pushover device registration request failed: {err}"
+            ) from err
 
-    async def download_and_discard_old_messages(self):
+    async def download_and_discard_old_messages(self) -> None:
         """Check for old queued messages and discard them to start fresh."""
         _LOGGER.info("Checking for old messages to discard...")
-        resp = await self.hass.async_add_executor_job(
-            lambda: requests.get(
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.get(
                 MESSAGES_URL,
                 params={"secret": self.secret, "device_id": self.device_id},
-            )
-        )
-        messages = resp.json().get("messages", [])
-        if not messages:
-            return
-        max_id = max(int(m["id"]) for m in messages)
-        _LOGGER.info("Discarding %d old messages...", len(messages))
-        await self.delete_messages_up_to(max_id)
+            ) as resp:
+                resp.raise_for_status()
+                messages = (await resp.json()).get("messages", [])
+                if not messages:
+                    return
+                max_id = max(int(m["id"]) for m in messages)
+                _LOGGER.info("Discarding %d old messages...", len(messages))
+                await self.delete_messages_up_to(max_id)
+        except ClientError as err:
+            _LOGGER.warning("Failed to download old messages: %s", err)
 
-    async def delete_messages_up_to(self, max_id):
+    async def delete_messages_up_to(self, max_id: int) -> None:
         """Tell Pushover to delete all messages up to a specific ID."""
-        await self.hass.async_add_executor_job(
-            lambda: requests.post(
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.post(
                 DELETE_URL_TEMPLATE.format(device_id=self.device_id),
                 data={"secret": self.secret, "message": max_id},
-            )
-        )
+            ) as resp:
+                resp.raise_for_status()
+        except ClientError as err:
+            _LOGGER.warning("Failed to delete messages: %s", err)
 
-    async def listen(self):
+    async def listen(self) -> None:
         """Maintain a persistent connection to Pushover and process new push events."""
         _LOGGER.info("Starting persistent WebSocket listener (binary frame expected).")
+        self._ws_task = asyncio.current_task()
+        
         while self._running:
             try:
-                async with ClientSession() as session:
-                    async with session.ws_connect(WEBSOCKET_URL) as ws:
-                        login_str = f"login:{self.device_id}:{self.secret}\n"
-                        await ws.send_str(login_str)
-                        _LOGGER.info("WebSocket connection established.")
+                session = await async_get_clientsession(self.hass).__aenter__()
+                async with session.ws_connect(WEBSOCKET_URL) as ws:
+                    login_str = f"login:{self.device_id}:{self.secret}\n"
+                    await ws.send_str(login_str)
+                    _LOGGER.info("WebSocket connection established for %s.", self.device_name)
 
-                        async for msg in ws:
-                            if msg.type == WSMsgType.BINARY:
-                                _LOGGER.info("WebSocket binary frame received: %s", msg.data)
-                                if msg.data == b"!":
-                                    await asyncio.sleep(0.5)
-                                    await self.fetch_and_fire()
-                                elif msg.data == b"#":
-                                    continue
-                                elif msg.data in (b"R", b"E", b"A"):
-                                    _LOGGER.warning(
-                                        "Received binary control frame '%s', reconnecting...", msg.data
-                                    )
-                                    break
-                            elif msg.type == WSMsgType.ERROR:
-                                _LOGGER.error("WebSocket error: %s", msg)
-                                break
-            except Exception as e:
+                    # Reset reconnect delay on successful connection
+                    self._reconnect_delay = INITIAL_RECONNECT_DELAY
+
+                    async for msg in ws:
+                        if msg.type == WSMsgType.BINARY:
+                            _LOGGER.debug("WebSocket binary frame received: %s", msg.data)
+                            if msg.data == b"!":
+                                await asyncio.sleep(0.5)
+                                await self.fetch_and_fire()
+                            elif msg.data == b"#":
+                                continue  # Keep-alive
+                            elif msg.data in (b"R", b"E", "A"):
+                                _LOGGER.warning(
+                                    "Received binary control frame '%s', reconnecting...",
+                                    msg.data,
+                                )
+                                break  # Break inner loop to reconnect
+                        elif msg.type == WSMsgType.ERROR:
+                            _LOGGER.error("WebSocket error: %s", msg)
+                            break
+            except asyncio.CancelledError:
+                _LOGGER.info("WebSocket listener task cancelled.")
+                raise  # Propagate cancellation
+            except (ClientError, Exception) as e:
                 _LOGGER.error("WebSocket connection failed: %s", e)
-                await asyncio.sleep(10)
-
-    async def fetch_and_fire(self):
-        """Fetch any new messages and emit Home Assistant events for each."""
-        try:
-            resp = await self.hass.async_add_executor_job(
-                lambda: requests.get(
-                    MESSAGES_URL,
-                    params={"secret": self.secret, "device_id": self.device_id},
+            finally:
+                # Ensure the session is always closed if it was opened
+                if "session" in locals() and session:
+                    await session.__aexit__(None, None, None)
+            
+            if self._running:
+                # Implement exponential backoff
+                _LOGGER.info("Waiting %s seconds to reconnect...", self._reconnect_delay)
+                await asyncio.sleep(self._reconnect_delay)
+                # Increase delay for next time, up to the max
+                self._reconnect_delay = min(
+                    self._reconnect_delay * RECONNECT_FACTOR, MAX_RECONNECT_DELAY
                 )
-            )
-            data = resp.json()
-            messages = data.get("messages", [])
-            for msg in messages:
-                enriched = self.unpack_json_payload(msg)
-                _LOGGER.info("Firing Home Assistant event for message: %s", enriched)
-                self.hass.bus.async_fire(PUSHOVER_EVENT, enriched)
-            if messages:
-                max_id = max(int(m["id"]) for m in messages)
-                await self.delete_messages_up_to(max_id)
-        except Exception as e:
+
+    async def fetch_and_fire(self) -> None:
+        """Fetch any new messages and emit Home Assistant events for each."""
+        session = async_get_clientsession(self.hass)
+        try:
+            async with session.get(
+                MESSAGES_URL,
+                params={"secret": self.secret, "device_id": self.device_id},
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                messages = data.get("messages", [])
+                for msg in messages:
+                    enriched = self._enrich_message_payload(msg)
+                    _LOGGER.info("Firing Home Assistant event for message: %s", enriched)
+                    self.hass.bus.async_fire(PUSHOVER_EVENT, enriched)
+                if messages:
+                    max_id = max(int(m["id"]) for m in messages)
+                    await self.delete_messages_up_to(max_id)
+        except ClientError as e:
             _LOGGER.error("Failed to fetch messages: %s", e)
 
-    def unpack_json_payload(self, msg):
-        """Extract key=value pairs embedded in the message body and merge them into the payload."""
+    def _enrich_message_payload(self, msg: dict) -> dict:
+        """Extract key=value pairs embedded in the message body and merge them."""
         enriched = dict(msg)
-        enriched['user_email'] = self.email         
+        enriched["user_email"] = self.email
+        enriched["device_name"] = self.device_name
         if "message" in msg:
             lines = msg["message"].split("\n")
             for line in lines:
@@ -203,5 +242,3 @@ class PushoverClient:
                     if key:
                         enriched[key] = value
         return enriched
-
-
