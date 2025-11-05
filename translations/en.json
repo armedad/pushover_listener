@@ -1,0 +1,56 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "title": "Pushover Listener Account",
+          "description": "Enter your Pushover account credentials.",
+          "data": {
+            "email": "Email",
+            "password": "Password",
+            "device_name": "Device Name"
+          }
+        }
+      },
+      "error": {
+        "invalid_auth": "Invalid email or password. Please try again.",
+        "unknown": "An unknown error occurred.",
+        "invalid_length": "Device name must be between 1 and 25 characters.",
+        "invalid_chars": "Device name can only contain letters, numbers, underscores, and hyphens."
+      },
+      "abort": {
+        "already_configured": "This email account is already configured."
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "Update Pushover Credentials",
+          "description": "Update the password or device name for {email}. The email address cannot be changed.",
+          "data": {
+            "password": "New Password",
+            "device_name": "Device Name"
+          }
+        }
+      },
+      "error": {
+        "invalid_auth": "Invalid password. Please try again.",
+        "unknown": "An unknown error occurred while validating.",
+        "invalid_length": "Device name must be between 1 and 25 characters.",
+        "invalid_chars": "Device name can only contain letters, numbers, underscores, and hyphens."
+      }
+    },
+    "device_automation": {
+      "trigger_type": {
+        "all_messages": "Any message is received",
+        "priority_critical": "Message with Priority: Critical (2)",
+        "priority_high": "Message with Priority: High (1)",
+        "priority_normal": "Message with Priority: Normal (0)",
+        "priority_low": "Message with Priority: Low (-1)",
+        "custom_level_critical": "Message with custom Level: critical",
+        "custom_level_high": "Message with custom Level: high",
+        "custom_level_normal": "Message with custom Level: normal",
+        "custom_level_low": "Message with custom Level: low",
+        "custom_type_alert": "Message with custom Type: alert"
+      }
+    }
+  }
